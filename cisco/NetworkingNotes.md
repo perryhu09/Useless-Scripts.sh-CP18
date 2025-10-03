@@ -10,13 +10,13 @@ Servers: Computers with software that allow them to provide information like ema
 
 Clients: Have software for requesting and displaying the information obtained from the server.
 
-![[Screenshot 2025-09-20 at 22.19.27.png]]
+
 
 Client Software 
 - Chrome, Firefox
 - A single computer can run multiple types of client software
 	- Ex: can check emails and view a web page while instant messaging and listening to audio.
-![[Screenshot 2025-09-20 at 22.21.45.png]]
+
 
 ##### Peer to Peer Network
 Possible for one computer to be used for both client and server software at the same time. 
@@ -45,7 +45,7 @@ Possible for one computer to be used for both client and server software at the 
 - Provide connectivity and ensure that data flows across the network
 - Can use destination end device address, along with info from network interconnections, to determine the path that messages should take through the network.
 
-![[Screenshot 2025-09-20 at 22.30.01.png]]
+
 
 Performs these functions
 - Regenerate and retransmit communication signals
@@ -73,7 +73,7 @@ Interface/Port ==> Specialized ports on a network device that connects to indivi
 Logical Topology ==> Connections between devices
 Physical Topology ==> Actual location of devices
 
-![[Screenshot 2025-09-25 at 08.20.52.png]]
+
 ##### Network Types
 - **Small Home Networks**
 	- Connects a few computers to each other and the internet
@@ -91,7 +91,7 @@ Physical Topology ==> Actual location of devices
 	- Administered by a single individual or organization
 		- Control is enforced at the network level and governs security + access control policies.
 	- Provide high-speed bandwidth to internal end devices and intermediary devices.
-![[Screenshot 2025-09-25 at 08.23.39.png]]
+
 
 ##### WANs
 - Network Infrastructure that spans a wide geographical area 
@@ -107,7 +107,7 @@ Internet ==> Interconnected LANs and WANs (LANs using WAN services to connect)
 - Only accessible by members, employees or authorized users.
 
 **Extranets**
-- Provide secure/safe access to individuals not connected with the organization, but requires access to organization's data.![[Screenshot 2025-09-25 at 11.05.37.png]]
+- Provide secure/safe access to individuals not connected with the organization, but requires access to organization's data.
 
 #### Connection Types
 
@@ -155,7 +155,7 @@ Internet ==> Interconnected LANs and WANs (LANs using WAN services to connect)
 - Connection when wired solution is not available.
 
 Converged Networks took over Traditional Networks with the Rule Agreement Standard in the middle instead of at the end
-![[Screenshot 2025-09-25 at 11.23.46.png]]
+
 
 ##### Network Architecture
 
@@ -176,7 +176,7 @@ Converged Networks took over Traditional Networks with the Rule Agreement Standa
 - Expands quickly to support new users and applications.
 - Does this without degrading the performance of services
 
-![[Screenshot 2025-09-25 at 11.38.53.png]]
+
 
 **Powerline**
 - Connecting a device to the network using an electrical outlet
