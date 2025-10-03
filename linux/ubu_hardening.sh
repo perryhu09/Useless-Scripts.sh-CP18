@@ -26,11 +26,11 @@ log_action() {
 	local message="$timestamp $1"
 
 	echo "$message"
-	echo "$messgae" >> "$LOG_FILE" 2>/dev/null
+	echo "$message" >> "$LOG_FILE" 2>/dev/null
 }
 
 backup_file() {
-	if  [-f "$1" ]; then
+	if  [ -f "$1" ]; then
 		cp "$1" "$1.bak.$(date +%s)"
 		log_action "Backed up $1"
 	fi
@@ -50,7 +50,7 @@ remove_unauthorized_users() {
 			continue
 		fi
 
-		if [[ !"${AUTHORIZED_USERS[@]}" =~ "${user}" ]]; then
+		if [[ ! "${AUTHORIZED_USERS[@]}" =~ "${user}" ]]; then
 			log_action "FOUND UNAUTHORIZED USER: $user - Removing ..."
 			userdel --remove-home "$user" 2>/dev/null
 			if [ $? -eq 0 ]; then
@@ -68,11 +68,11 @@ fix_admin_group() {
 	# ADMIN - older ubuntu versions used admin group, included for compatability
 
 	SUDO_MEMBERS=$(getent group sudo | cut -d: -f4 | tr ',' ' ')
-	ADMIN_MEMBERS=$(getent group admink 2>/dev/null | cut -d: -f4 | tr ',' ' ')
+	ADMIN_MEMBERS=$(getent group admin 2>/dev/null | cut -d: -f4 | tr ',' ' ')
 
 	# Remove unauthorized users from sudo group
 	for user in $SUDO_MEMBERS; do
-		if [[! "$ADMIN_USERS[@]" =~ "${user}" ]]; then
+		if [[ ! "$ADMIN_USERS[@]" =~ "${user}" ]]; then
 			log_action "Removing $user from sudo group"
 			sudo deluser "$user" sudo
 		fi
@@ -81,7 +81,7 @@ fix_admin_group() {
 	# Check if admin group exists (then remove)
 	if getent group admin > /dev/null 2>&1; then
 		for user in $ADMIN_MEMBERS; do
-			if [[! "$ADMIN_USERS[@]" =~ "${user}" ]]; then
+			if [[ ! "$ADMIN_USERS[@]" =~ "${user}" ]]; then
 				log_action "Removing $user from admin group"
 				sudo deluser "$user" admin
 			fi
@@ -102,7 +102,7 @@ check_uid_zero() {
 
 	UID_ZERO=$(awk -F: '$3 == 0 && $1 != "root" {print $1}' /etc/passwd)
 
-	if [ -n "$USER_ZERO" ]; then
+	if [ -n "$UID_ZERO" ]; then
 		for user in $UID_ZERO; do
 			log_action "WARNING: Found UID 0 account: $user - Removing..."
 			deluser --remove-home "$user" 2>/dev/null
@@ -128,10 +128,60 @@ disable_guest() {
 			echo "allow-guest=false" >> /etc/lightdm/lightdm.conf
 			log_action "Disabled guest account in lightdm.conf"
 		fi
-		# ^^^ what is this implementation??? what if allow-guest=true?
 	fi
 
-	# continue here
+	# GDM3 Display Manager
+	for gdm_conf in /etc/gdm3/custom.conf /etc/gdm/custom.conf; do
+		if [ -f "$gdm_conf" ]; then
+			backup_file "$gdm_conf"
+
+			local dm_name="GDM3"
+			[[ "$gdm_conf" == *"/gdm/"* ]] && dm_name="GDM"
+
+			# Disable timed login
+			if [[ "$gdm_conf" == *"/gdm3/"* ]]; then
+				if grep -q "^TimedLoginEnable.*=.*true" "$gdm_conf"; then
+					sed -i 's/^\(TimedLoginEnable.*=.*\)true/\1false/' "$gdm_conf"
+					log_action "Disabled timed login in ${dm_name} (replaced true w/ false)"
+				elif ! grep -q "^TimedLoginEnable.*=.*false" "$gdm_conf"; then
+					if grep -q "^\[security\]" "$gdm_conf"; then
+						sed -i '/^\[security\]/a TimedLoginEnable=false' "$gdm_conf"
+					else
+						echo -e "\n[security]\n TimedLoginEnable=false" >> "$gdm_conf"
+					fi
+					log_action "Disabled timed login in ${dm_name} (added new setting)"
+				fi
+			fi
+
+			# Disable automatic login
+			if grep -q "^AutomaticLoginEnable.*=.+true" "$gdm_conf"; then
+				sed -i 's/^\(AutomaticLoginEnable.*=.*\)true/\1false/' "$gdm_conf"
+				log_action "Disabled automatic log in ${dm_name} (replaced true with false)"
+			elif ! grep -q "^AutomaticLoginEnable.*=.*false" "$gdm_conf"; then
+				if grep -q "^\[security\]" "$gdm_conf"; then
+					sed -i '/^\[daemon\]/a AutomaticLoginEnable=false' "$gdm_conf"
+				else
+					echo -e "\n[daemon]\n AutomaticLoginEnable=false" >> "$gdm_conf"
+				fi
+				log_action "Disabled automatic login in ${dm_name} (added new setting)"
+			fi
+		fi
+	done
+	# sudo systemctl restart gdm3
+	# REQUIRES SYSTEM RESTART AT THE END
+}
+
+set_all_user_passwords() {
+	log_action "=== SETTING ALL USER PASSWORDS ==="
+
+	REGULAR_USERS=$(awk -F: '($3 >= 1000) && ($1 != "nobody") {print $1}' /etc/passwd)
+
+	for user in $REGULAR_USERS; do
+		echo "$user:Cyb3rPatr!0t" | chpasswd
+		log_action "Set password for user: $user"
+	done
+
+	log_action "All user passwords set to; Cyb3rPatr!0t"
 }
 
 #===============================================
@@ -139,8 +189,19 @@ disable_guest() {
 #===============================================
 
 # remove nullok in /etc/pam.d/common-auth to disallow empty pwds
-check_empty_passwords() {}
+disallow_empty_passwords() {
+	log_action "=== DISALLOWING EMPTY PASSWORDS ==="
+	backup_file /etc/pam.d/common-auth
 
+	if grep -q "nullok" /etc/pam.d/common-auth; then
+		sed -i 's/nullok//g' /etc/pam.d/common-auth
+		log_action "Removed nullok from common-auth"
+	else
+		log_action "No nullok found in common-auth"
+	fi
+
+	log_action "Disallowed empty user passwords"
+}
 
 #===============================================
 # MAIN EXECUTION
