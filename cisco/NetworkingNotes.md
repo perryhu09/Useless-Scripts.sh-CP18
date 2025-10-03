@@ -2,7 +2,7 @@
 
 Hosts: Computers connected to a network and participate directly in network communication
 - Can be called end devices, clients,
-- Refers to devices on a[[ ]]network that are assigned a number for communication purposes
+- Refers to devices on a network that are assigned a number for communication purposes
 	- IP (Internet Protocol) address identifies the host and the network to which the host is connected to
 
 Servers: Computers with software that allow them to provide information like email or web pages, to other end devices on the network
