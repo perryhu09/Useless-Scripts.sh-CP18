@@ -324,6 +324,7 @@ function main {
     Write-Host "Starting Windows Hardening Script..."
     
     #Calling Functions
+    manageLocalGroups
     firewall_status
     antivirus_check
     check_user_accounts
@@ -332,7 +333,7 @@ function main {
     checkUAC
     disable_additional_services
     secure_registry_settings
-    manageLocalGroups
+   
     Write-Host "Windows Hardening Script completed."
 }
 
