@@ -89,6 +89,58 @@ function antivirus_check {
     }
 }
 
+function disable_remote_services {
+    Write-Host "Disabling common remote services (Telnet, SSH, RDP, WinRM, Remote Registry, Remote Access)..."
+
+    # Services to disable: key = service short name, value = friendly name
+    $servicesToDisable = @{
+        'TlntSvr'        = 'Telnet Server'
+        'sshd'           = 'OpenSSH Server'
+        'TermService'    = 'Remote Desktop Services (TermService)'
+        'WinRM'          = 'Windows Remote Management (WinRM)'
+        'RemoteRegistry' = 'Remote Registry'
+        'RemoteAccess'   = 'Routing and Remote Access'
+        'RasMan'         = 'Remote Access Connection Manager'
+    }
+
+    foreach ($svcName in $servicesToDisable.Keys) {
+        $friendly = $servicesToDisable[$svcName]
+        $svc = Get-Service -Name $svcName -ErrorAction SilentlyContinue
+        if ($svc) {
+            try {
+                if ($svc.Status -ne 'Stopped') {
+                    Write-Host "Stopping $friendly ($svcName)..."
+                    Stop-Service -Name $svcName -Force -ErrorAction Stop
+                }
+                Write-Host "Setting $friendly ($svcName) startup type to Disabled..."
+                Set-Service -Name $svcName -StartupType Disabled -ErrorAction Stop
+                Write-Host "$friendly ($svcName) is now disabled."
+            } catch {
+    Write-Host "Warning: could not modify service $svcName : $($_.Exception.Message)"
+}
+
+        } else {
+            Write-Host "$friendly ($svcName) not present on this system."
+        }
+    }
+
+    # As an extra precaution, disable Remote Desktop connections via registry
+    try {
+        $rdpRegPath = 'HKLM:\SYSTEM\CurrentControlSet\Control\Terminal Server'
+        if (Test-Path $rdpRegPath) {
+            $current = Get-ItemProperty -Path $rdpRegPath -Name 'fDenyTSConnections' -ErrorAction SilentlyContinue
+            if ($null -eq $current -or $current.fDenyTSConnections -ne 1) {
+                Write-Host "Disabling Remote Desktop connections via registry (fDenyTSConnections = 1)..."
+                Set-ItemProperty -Path $rdpRegPath -Name 'fDenyTSConnections' -Value 1 -ErrorAction Stop
+                Write-Host "Remote Desktop (RDP) connections disabled via registry."
+            } else {
+                Write-Host "Remote Desktop (RDP) already disabled in registry."
+            }
+        }
+    } catch {
+        Write-Host "Warning: Unable to modify RDP registry setting: $_"
+    }
+}
 
 ########################################################################
 # Execute Functions
@@ -102,6 +154,9 @@ function main {
     firewall_status
     antivirus_check
     check_user_accounts
+    windows_update
+    disable_remote_services
+
     
     Write-Host "Windows Hardening Script completed."
 }
