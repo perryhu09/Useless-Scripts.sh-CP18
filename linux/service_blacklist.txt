@@ -212,8 +212,3 @@ powersploit
 phpsploit
 shellter
 empire
-
-
-
-
-
