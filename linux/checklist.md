@@ -26,6 +26,7 @@
 # Network Security
 - [ ] Harden ssh configurations
 - [ ] Enable tcp synncookies
+- [ ] Harden kernel sysctl
 
 # Firewall
 - [ ] Remove iptables-persistent
@@ -39,4 +40,10 @@
 - [ ] Delete games, hacking tools, media p2p
 - [ ] Remove bad media extensions
 
-# Lynis
+# misc
+- [ ] disable cron job to be made from user
+- [ ] hardening Auditd 
+- [ ] Backdoor access
+- [ ] Antivirus implementation
+- [ ] run antivirus, logs are "/var/log/rkhunter.log", "/var/log/chkrootkit.log"
+- [ ] Lynis - stores logs in  "/var/log/lynis-report.dat"
