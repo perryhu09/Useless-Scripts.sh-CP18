@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+ #!/usr/bin/env bash
 
 #===============================================
 # Configuration && Setup
@@ -527,6 +527,11 @@ configure_firewall() {
 
 	# ADD SERVICE SPECIFIC RULES BASED ON README
 	# ie: allow http, https, mysql, ssh, etc
+	# sudo ufw allow ssh
+	# sudo ufw reload
+	# sudo systemctl enable ssh
+	# sudo systemctl start ssh
+
 	
 	log_action "Firewall configuration complete"	
 }
