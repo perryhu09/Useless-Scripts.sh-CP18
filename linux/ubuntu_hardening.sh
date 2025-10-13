@@ -429,39 +429,43 @@ find_orphaned_files() {
 # Network Security
 #===============================================
 
+# REQUIRES OpenSSH Sever Service to be installed (should be by default)
 harden_ssh() {
-	log_action "=== DISABLING SSH ROOT LOGIN ==="
+	log_action "=== HARDENING SSH CONFIGURATION ==="
 
 	backup_file /etc/ssh/sshd_config
 
-	# Disable root login via SSH
-	if grep -q "^PermitRootLogin" /etc/ssh/sshd_config; then
-		sed -i 's/^PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config
-		log_action "Set PermitRootLogin to no"
-	else
-		echo "PermitRootLogin no" >> /etc/ssh/sshd_config
-		log_action "Added PermitRootLogin no"
-	fi
+	# Helper fn
+	set_ssh_config() {
+		local setting="$1"
+		local value="$2"
+		sed -i "/^#*${setting}/d" /etc/ssh/sshd_config
+		echo "${setting} ${value}" >> /etc/ssh/sshd_config
+		log_action "Set ${setting} ${value}"
+	}
 
-	log_action "SSH root login disabled"
+	set_ssh_config "Protocol" "2"
+	set_ssh_config "PermitRootLogin" "no"
+	set_ssh_config "PasswordAuthentication" "yes"
+	set_ssh_config "PermitEmptyPasswords" "no"
+	set_ssh_config "ChallengeResponseAuthentication" "no"
+	set_ssh_config "UsePAM" "yes"
+	set_ssh_config "LogLevel" "VERBOSE"
+	set_ssh_config "X11Forwarding" "no"
+	set_ssh_config "MaxAuthTries" "4"
+	set_ssh_config "IgnoreRhosts" "yes"
+	set_ssh_config "HostbasedAuthentication" "no"
+	set_ssh_config "LoginGraceTime" "60"
+	set_ssh_config "ClientAliveinterval" "300"
+	set_ssh_config "ClientAliveCountMax" "2"
+	set_ssh_config "AllowTcpForwarding" "no" # prevent SSH tunneling
+	set_ssh_config "AllowAgentForwarding" "no"
+	set_ssh_config "PermitTunnel" "no"
+	set_ssh_config "StrictModes" "yes"
+	set_ssh_config "PermitUserEnvironment" "no"
+	set_ssh_config "GSSAPIAuthentication" "no" # Kerberos
 
-	# ENABLE password authentication
-	if grep -q "^PasswordAuthentication" /etc/ssh/sshd_config; then
-		sed -i 's/^PasswordAuthentication.*/PasswordAuthentication yes/' /etc/ssh/sshd_config
-	else
-		echo "PasswordAuthentication yes" >> /etc/ssh/sshd_config
-	fi
-
-	log_action "Enabled SSH password authentication"
-
-	if grep -q "^PermitEmptyPasswords" /etc/ssh/sshd_config; then
-		sed -i 's/^PermitEmptyPasswords.*/PermitEmptyPasswords no/' /etc/ssh/sshd_config
-	else
-		echo "PermitEmptyPasswords no" >> /etc/ssh/sshd_config
-	fi
-	log_action "Disabled empty passwords for SSH"
-
-	log_action "SSH Hardening complete (requires reboot)"
+	log_action "SSH Hardening complete (reboot required)"
 }
 
 enable_tcp_syncookies() {
