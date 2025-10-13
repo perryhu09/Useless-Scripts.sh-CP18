@@ -1108,10 +1108,6 @@ main() {
 
 	# 11. ANTIVIRUS & ROOTKIT DETECTION
 	log_action "[ PHASE 11: MALWARE DETECTION ]"
-	# NOTE: remove_backdoors requires README analysis first
-	# Uncomment and provide allow-file when ready:
-	# remove_backdoors "/path/to/README" --force
-	log_action "Skipping backdoor removal (requires manual README analysis)"
 	run_rootkit_scans
 	log_action ""
 
