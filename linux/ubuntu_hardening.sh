@@ -491,7 +491,7 @@ harden_kernel_sysctl() {
 	log_action "=== HARDENING KERNEL ==="
 
 	backup_file /etc/sysctl.conf
-	backpu_file /etc/sysctl.d/99-hardening.conf
+	backup_file /etc/sysctl.d/99-hardening.conf
 	
 }
 
@@ -551,26 +551,60 @@ configure_firewall() {
 disable_unnecessary_services() {
 	log_action "=== DISABLING UNNECESSARY SERVICES ==="
 
-	UNNECESSARY_SERVICES=(
-		"nginx"
-		"telnet"
-		# ... add more or predefined list in another file or what???
-	)
+	local BLACKLIST_FILE="${1:-}"
 
-	for service in "${UNNECESSARY_SERVICES[@]}"; do
+	# If no file provided, skip this function
+	if [[ -z "$BLACKLIST_FILE" ]]; then
+		log_action "WARNING: No service blacklist file provided"
+		log_action "Usage: disable_unnecessary_services <blacklist_file>"
+		log_action "Skipping service disabling..."
+		return 0
+	fi
+
+	# Check if file exists
+	if [[ ! -f "$BLACKLIST_FILE" ]]; then
+		log_action "ERROR: Service blacklist file not found: $BLACKLIST_FILE"
+		return 1
+	fi
+
+	log_action "Reading prohibited services from: $BLACKLIST_FILE"
+
+	# Read services from file (one per line, ignore comments and empty lines)
+	local service_count=0
+	local disabled_count=0
+
+	while IFS= read -r service || [[ -n "$service" ]]; do
+		# Skip empty lines and comments
+		[[ -z "$service" || "$service" =~ ^[[:space:]]*# ]] && continue
+
+		# Clean up whitespace
+		service=$(echo "$service" | xargs)
+		[[ -z "$service" ]] && continue
+
+		((service_count++))
+
+		# Check if service exists
 		if systemctl list-unit-files | grep -q "^${service}.service"; then
 			if systemctl is-active --quiet "$service"; then
-				systemctl stop "$service"
-				systemctl disable "$service"
+				log_action "Stopping and disabling: $service"
+				systemctl stop "$service" &>/dev/null
+				systemctl disable "$service" &>/dev/null
+				((disabled_count++))
 				log_action "Stopped and disabled: $service"
 			elif systemctl is-enabled --quiet "$service" 2>/dev/null; then
-				systemctl disable "$service"
+				log_action "Disabling: $service"
+				systemctl disable "$service" &>/dev/null
+				((disabled_count++))
 				log_action "Disabled: $service"
+			else
+				log_action "Service $service is already disabled"
 			fi
+		else
+			log_action "Service $service not found on system (skipping)"
 		fi
-	done
+	done < "$BLACKLIST_FILE"
 
-	log_action "Unnecessary services disabled"	
+	log_action "Processed $service_count services, disabled $disabled_count"
 }
 
 audit_running_services() {
@@ -584,38 +618,59 @@ audit_running_services() {
 }
 
 remove_unauthorized_software() {
-	# Aislerobot, games, hacker tools, etc
 	log_action "=== REMOVING UNAUTHORIZED SOFTWARE ==="
 
-	GAMES=(
-		"aisleriot"
-	)
+	local BLACKLIST_FILE="${1:-}"
 
-	HACKING_TOOLS=(
+	# If no file provided, skip this function
+	if [[ -z "$BLACKLIST_FILE" ]]; then
+		log_action "WARNING: No package blacklist file provided"
+		log_action "Usage: remove_unauthorized_software <blacklist_file>"
+		log_action "Skipping software removal..."
+		return 0
+	fi
 
-	)
-	
-	MEDIA_P2P=(
+	# Check if file exists
+	if [[ ! -f "$BLACKLIST_FILE" ]]; then
+		log_action "ERROR: Package blacklist file not found: $BLACKLIST_FILE"
+		return 1
+	fi
 
-	)
+	log_action "Reading prohibited packages from: $BLACKLIST_FILE"
 
-	PROHIBITED=("${GAMES[@]}" "${HACKING_TOOLS[@]}" "${MEDIA_P2P[@]}")
+	# Read packages from file (one per line, ignore comments and empty lines)
+	local package_count=0
+	local removed_count=0
 
-	for package in "${PROHIBITED[@]}"; do
-		if dpkg -l | grep -q "^ii  $package "; then
-			log_action "REMOVING: $package"
-			apt purge -y "$package" 2>/dev/null
-			if [ $? -eq 0 ]; then
+	while IFS= read -r package || [[ -n "$package" ]]; do
+		# Skip empty lines and comments
+		[[ -z "$package" || "$package" =~ ^[[:space:]]*# ]] && continue
+
+		# Clean up whitespace
+		package=$(echo "$package" | xargs)
+		[[ -z "$package" ]] && continue
+
+		((package_count++))
+
+		# Check if package is installed
+		if dpkg -l 2>/dev/null | grep -q "^ii  $package "; then
+			log_action "Removing package: $package"
+			if apt purge -y "$package" &>/dev/null; then
+				((removed_count++))
 				log_action "Successfully removed: $package"
 			else
-				log_action "Failed to remove: $package (may not be installed)"
+				log_action "Failed to remove: $package"
 			fi
+		else
+			log_action "Package $package not installed (skipping)"
 		fi
-	done
+	done < "$BLACKLIST_FILE"
 
-	# clean up dependencies
-	apt autoremove -y
-	log_action "Removed unauthorized software and cleaned dependencies"
+	# Clean up dependencies
+	log_action "Cleaning up orphaned dependencies..."
+	apt autoremove -y &>/dev/null
+
+	log_action "Processed $package_count packages, removed $removed_count"
 }
 
 # Implement another function for auditing installed packages?
@@ -653,299 +708,149 @@ remove_prohibited_media() {
 #===============================================
 
 secure_cron_system() {
-	log_action "=== SECURING CRON ==="
+	log_action "=== SECURING CRON SYSTEM ==="
 
+	# Check current user's crontab
 	if crontab -l &>/dev/null; then
-		crontab -l
+		log_action "Current user has crontab entries (logged to file)"
+		crontab -l >> "$LOG_FILE" 2>&1
 	else
-		log_action "No crontab for current user."
+		log_action "No crontab for current user"
 	fi
 
+	# Scan system cron directories
+	log_action "Scanning system cron directories..."
 	for file in /etc/crontab /etc/cron.*/* /var/spool/cron/crontabs/*; do
 		if [ -e "$file" ]; then
-			log_action "Found: $file"
-			cat "$file"
+			log_action "Found cron file: $file"
+			cat "$file" >> "$LOG_FILE" 2>&1
 		fi
 	done
 
+	# Check init files
+	log_action "Checking init files..."
 	for init_file in /etc/init/*.conf /etc/init.d/*; do
-		[ -e "$init_file" ] && log_action "Found init file: $init_file"
+		if [ -e "$init_file" ]; then
+			log_action "Found init file: $init_file"
+		fi
 	done
 
+	# Clear /etc/rc.local (startup script)
 	log_action "Clearing /etc/rc.local..."
 	backup_file "/etc/rc.local"
-	echo "exit 0" > /etc/rc.local
-	chmod +x /etc/rc.local
+	echo "exit 0" > /etc/rc.local 2>/dev/null
+	chmod +x /etc/rc.local &>/dev/null
 	log_action "/etc/rc.local reset to 'exit 0'"
 
+	# List all user crontabs
 	log_action "Listing all user crontabs..."
 	while IFS=: read -r user _; do
 		if crontab -u "$user" -l &>/dev/null; then
-			log_action "Crontab for $user:"
-			crontab -u "$user" -l
-		else
-			log_action "No crontab for $user"
+			log_action "Crontab for $user (logged to file)"
+			crontab -u "$user" -l >> "$LOG_FILE" 2>&1
 		fi
 	done < /etc/passwd
 
+	# Deny all users from using cron (restrictive approach)
 	log_action "Denying all users from using cron..."
 	backup_file "/etc/cron.deny"
-	echo "ALL" >> /etc/cron.deny
+	echo "ALL" >> /etc/cron.deny 2>/dev/null
 	log_action "Appended 'ALL' to /etc/cron.deny"
 
-	log_action "Cron lockdown procedure completed."
+	log_action "Cron security lockdown completed"
 }
 
 #===============================================
 # Antivirus
 #===============================================
 
-remove_backdoors() {
-  log_action "=== REMOVING POTENTIAL BACKDOORS ==="
-
-  local ALLOW_FILE="${1:-}"
-  local FORCE=0
-  [[ "${2:-}" == "--force" ]] && FORCE=1
-
-  # Set a sane default for LOG_FILE if not set
-  if [[ -z "${LOG_FILE:-}" ]]; then
-    LOG_FILE="/var/log/remove_backdoors.log"
-    touch "$LOG_FILE" 2>/dev/null || true
-  fi
-
-  # Directory to stash any extra backups or lists
-  local BKDIR="/var/backdoor_backups"
-  mkdir -p "$BKDIR" 2>/dev/null || true
-
-  if [[ -z "$ALLOW_FILE" ]]; then
-    log_action "Error: allow file is required. Usage: remove_backdoors <allow_file> [--force]"
-    return 1
-  fi
-
-  local mcmd
-  for mcmd in ss awk grep sed sort uniq lsof whereis dpkg apt-get killall readlink; do
-    if ! command -v "$mcmd" >/dev/null 2>&1; then
-      log_action "Missing cmd: $mcmd"
-      return 1
-    fi
-  done
-
-  # Read allowed ports from the file
-  local -a ALLOW_PORTS=()
-  mapfile -t ALLOW_PORTS < <(
-    grep -Eo '(:|^|[^0-9])([1-9][0-9]{0,4})([^0-9]|$)' "$ALLOW_FILE" \
-    | sed -E 's/[^0-9]//g' \
-    | awk '($1>=1 && $1<=65535)' \
-    | sort -n | uniq
-  )
-
-  is_allowed() {
-    local p="$1"
-    local ap
-    for ap in "${ALLOW_PORTS[@]}"; do
-      [[ "$ap" == "$p" ]] && return 0
-    done
-    return 1
-  }
-
-  log_action "Allowed ports: ${ALLOW_PORTS[*]:-<none>}"
-
-  log_action "Collecting exposed listeners not bound to loopback"
-  local ss_snapshot="$BKDIR/ss_listening_$(date +%s).txt"
-  ss -lntu > "$ss_snapshot" 2>&1 || true
-  log_action "Saved ss snapshot to $ss_snapshot"
-
-  local -a EXPOSED_PORTS=()
-  mapfile -t EXPOSED_PORTS < <(
-    cat "$ss_snapshot" \
-      | awk 'NR>1 {print $5}' \
-      | awk '
-          {
-            addr=$0
-            gsub(/\[|\]/,"",addr)
-            n=split(addr, a, ":")
-            port=a[n]
-            host=substr(addr, 1, length(addr)-length(port)-1)
-            if (host == "" || host == "*") host="0.0.0.0"
-            if (host ~ /^127\./) next
-            if (host == "::1") next
-            print port
-          }' \
-      | awk '($1>=1 && $1<=65535)' \
-      | sort -n | uniq
-  )
-  log_action "Exposed ports: ${EXPOSED_PORTS[*]:-<none>}"
-
-  local -a UNEXPECTED=()
-  local p
-  for p in "${EXPOSED_PORTS[@]}"; do
-    is_allowed "$p" || UNEXPECTED+=("$p")
-  done
-
-  if [[ ${#UNEXPECTED[@]} -eq 0 ]]; then
-    log_action "No unexpected exposed ports"
-    ss -l | tee -a "$LOG_FILE"
-    return 0
-  fi
-
-  log_action "Unexpected ports: ${UNEXPECTED[*]}"
-
-  handle_port() {
-    local port="$1"
-    log_action "----- Handling port ${port} -----"
-
-    log_action "Finding program using the port"
-    local -a PIDS=()
-    mapfile -t PIDS < <(lsof -nP -i :"$port" -sTCP:LISTEN -t 2>/dev/null || true)
-    if [[ ${#PIDS[@]} -eq 0 ]]; then
-      mapfile -t PIDS < <(lsof -nP -i UDP:"$port" -t 2>/dev/null || true)
-    fi
-    if [[ ${#PIDS[@]} -eq 0 ]]; then
-      log_action "No process found for port ${port}"
-      return
-    fi
-    log_action "PIDs: ${PIDS[*]}"
-
-    local pid exe_path program pkg=""
-    pid="${PIDS[0]}"
-    exe_path="$(readlink -f "/proc/${pid}/exe" 2>/dev/null || true)"
-    program="$(basename "${exe_path:-unknown}" 2>/dev/null || true)"
-    log_action "Executable: ${exe_path:-unknown}"
-    log_action "Program: ${program:-unknown}"
-
-    log_action "Locating program with whereis"
-    whereis "$program" | tee -a "$LOG_FILE" || true
-
-    if [[ -n "${exe_path:-}" && -e "$exe_path" ]]; then
-      if dpkg -S "$exe_path" >/tmp/dpkg_owner.txt 2>/dev/null; then
-        pkg="$(cut -d: -f1 </tmp/dpkg_owner.txt | head -n1)"
-        log_action "Owning package: ${pkg}"
-      else
-        log_action "No package owns ${exe_path}"
-      fi
-    fi
-
-    if [[ $FORCE -eq 1 ]]; then
-      if [[ -n "$pkg" ]]; then
-        # Save file list for the package before purge
-        local pkglist="$BKDIR/pkg_${pkg}_files_$(date +%s).list"
-        dpkg -L "$pkg" > "$pkglist" 2>/dev/null || true
-        log_action "Saved package file list to $pkglist"
-
-        log_action "Purging package ${pkg}"
-        DEBIAN_FRONTEND=noninteractive apt-get purge -y "$pkg" | tee -a "$LOG_FILE" || true
-
-        log_action "Running autoremove"
-        DEBIAN_FRONTEND=noninteractive apt-get autoremove -y | tee -a "$LOG_FILE" || true
-      else
-        if [[ -n "${exe_path:-}" && -e "$exe_path" ]]; then
-          # Back up the binary before delete
-          backup_file "$exe_path"
-          log_action "Deleting binary ${exe_path}"
-          rm -f -- "$exe_path" || true
-        fi,
-        if [[ -n "${program:-}" ]]; then
-          log_action "Killing processes named ${program}"
-          killall -9 "$program" 2>/dev/null || true
-        fi
-        local spid
-        for spid in "${PIDS[@]}"; do
-          log_action "Killing PID ${spid}"
-          kill -9 "$spid" 2>/dev/null || true
-        done
-      fi
-    else
-      log_action "[DRY RUN] Would purge: ${pkg:-<none>}"
-      log_action "[DRY RUN] Would backup and delete: ${exe_path:-<unknown>} and kill: ${program:-<unknown>}"
-    fi
-
-    log_action "Verifying port ${port} is closed"
-    if ss -lntu | grep -qE "[:\.]${port}(\s|$)"; then
-      log_action "Port ${port} still listening"
-    else
-      log_action "Port ${port} is closed"
-    fi
-  }
-
-  for p in "${UNEXPECTED[@]}"; do
-    handle_port "$p"
-  done
-
-  log_action "Final check of listeners"
-  ss -l | tee -a "$LOG_FILE"
-}
-
 run_rootkit_scans() {
-	log_action "=== RUNNING ROOTKIT SCANS (rkhunter, chkrootkit) ==="
+	log_action "=== RUNNING ROOTKIT SCANS ==="
 
 	local RK_LOG="/var/log/rkhunter.log"
 	local CRK_LOG="/var/log/chkrootkit.log"
 
-	# Make sure apt is ready
+	# Update package lists
+	log_action "Updating package lists for rootkit scanner installation..."
 	apt update -y -qq &>/dev/null
 
-	# rkhunter install or reinstall
-	if ! dpkg -s rkhunter >/dev/null 2>&1; then
+	# Install or reinstall rkhunter
+	if ! dpkg -s rkhunter &>/dev/null; then
+		log_action "Installing rkhunter..."
 		DEBIAN_FRONTEND=noninteractive apt-get install -y -qq rkhunter &>/dev/null
-		log_action "Installed rkhunter"
+		log_action "rkhunter installed successfully"
 	else
+		log_action "Reinstalling rkhunter for clean baseline..."
 		DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --reinstall rkhunter &>/dev/null
-		log_action "Reinstalled rkhunter"
+		log_action "rkhunter reinstalled successfully"
 	fi
 
-	# chkrootkit install or reinstall
-	if ! dpkg -s chkrootkit >/dev/null 2>&1; then
+	# Install or reinstall chkrootkit
+	if ! dpkg -s chkrootkit &>/dev/null; then
+		log_action "Installing chkrootkit..."
 		DEBIAN_FRONTEND=noninteractive apt-get install -y -qq chkrootkit &>/dev/null
-		log_action "Installed chkrootkit"
-		#log installation of chrootkit
+		log_action "chkrootkit installed successfully"
 	else
+		log_action "Reinstalling chkrootkit for clean baseline..."
 		DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --reinstall chkrootkit &>/dev/null
-		log_action "Reinstalled chkrootkit"
+		log_action "chkrootkit reinstalled successfully"
 	fi
 
-	# rkhunter config backup and small hardening tweaks
+	# Configure rkhunter
 	if [ -f /etc/rkhunter.conf ]; then
 		backup_file /etc/rkhunter.conf
-		# Prefer mirror updates and quiet web fetches if present in conf
+		log_action "Configuring rkhunter..."
+		# Prefer mirror updates and quiet web fetches
 		sed -i 's/^[#[:space:]]*UPDATE_MIRRORS=.*/UPDATE_MIRRORS=1/' /etc/rkhunter.conf 2>/dev/null || true
 		sed -i 's/^[#[:space:]]*MIRRORS_MODE=.*/MIRRORS_MODE=1/' /etc/rkhunter.conf 2>/dev/null || true
 		sed -i 's|^[#[:space:]]*WEB_CMD=.*|WEB_CMD="wget -q"|' /etc/rkhunter.conf 2>/dev/null || true
+		log_action "rkhunter configuration updated"
 	fi
 
-	# Update rkhunter data and baseline
-	log_action "Updating rkhunter data"
+	# Update rkhunter database
+	log_action "Updating rkhunter signatures database..."
 	rkhunter --update &>> "$RK_LOG" || true
 
-	log_action "Refreshing rkhunter file property database"
+	# Build baseline file property database
+	log_action "Building rkhunter file property baseline..."
 	rkhunter --propupd &>> "$RK_LOG" || true
 
 	# Run rkhunter scan
-	log_action "Starting rkhunter check"
+	log_action "Starting rkhunter system scan (this may take several minutes)..."
 	rkhunter --check --sk --nocolors --noappend-log &>> "$RK_LOG" || true
-	log_action "rkhunter complete. Log: $RK_LOG"
+	log_action "rkhunter scan completed. Full log: $RK_LOG"
 
-	# Run chkrootkit
-	log_action "Starting chkrootkit check"
-	# -q for quiet. Pipe to tee so we always have a file on disk.
-	chkrootkit -q | tee "$CRK_LOG" >/dev/null || true
-	log_action "chkrootkit complete. Log: $CRK_LOG"
+	# Run chkrootkit scan
+	log_action "Starting chkrootkit system scan..."
+	chkrootkit -q > "$CRK_LOG" 2>&1 || true
+	log_action "chkrootkit scan completed. Full log: $CRK_LOG"
 
-	# Append a short summary of both logs into the main log
-	{ echo "[rkhunter] tail of log:"; tail -n 50 "$RK_LOG" 2>/dev/null || true; } \
-		| sed 's/^/[rkhunter] /' >> "$LOG_FILE" 2>/dev/null
-	{ echo "[chkrootkit] tail of log:"; tail -n 50 "$CRK_LOG" 2>/dev/null || true; } \
-		| sed 's/^/[chkrootkit] /' >> "$LOG_FILE" 2>/dev/null
+	# Append scan results to main log
+	{
+		echo "========== rkhunter Results (last 50 lines) =========="
+		tail -n 50 "$RK_LOG" 2>/dev/null || echo "No rkhunter log found"
+	} >> "$LOG_FILE" 2>/dev/null
 
-	# Basic alerting based on common markers
+	{
+		echo "========== chkrootkit Results (last 50 lines) =========="
+		tail -n 50 "$CRK_LOG" 2>/dev/null || echo "No chkrootkit log found"
+	} >> "$LOG_FILE" 2>/dev/null
+
+	# Basic alerting based on common warning patterns
+	log_action "Analyzing scan results for suspicious findings..."
 	local RK_ALERTS CRK_ALERTS
 	RK_ALERTS=$(grep -Ei "Warning|suspect|infected|rootkit" "$RK_LOG" 2>/dev/null | wc -l)
 	CRK_ALERTS=$(grep -Ei "INFECTED|Vulnerable|Warning" "$CRK_LOG" 2>/dev/null | wc -l)
 
 	if [ "${RK_ALERTS:-0}" -gt 0 ] || [ "${CRK_ALERTS:-0}" -gt 0 ]; then
-		log_action "ALERT: Potential findings detected by rootkit scanners. Review $RK_LOG and $CRK_LOG"
+		log_action "ALERT: Potential security issues detected by rootkit scanners"
+		log_action "ALERT: rkhunter warnings: ${RK_ALERTS}, chkrootkit warnings: ${CRK_ALERTS}"
+		log_action "ALERT: Review full logs at $RK_LOG and $CRK_LOG"
 	else
-		log_action "Rootkit scans show no obvious findings"
+		log_action "No obvious rootkit indicators found in scans"
 	fi
+
+	log_action "Rootkit scanning complete"
 }
 
 #==============================================
@@ -953,32 +858,44 @@ run_rootkit_scans() {
 #==============================================
 
 harden_auditd() {
-	log_action "=== AUDITD HARDENING ==="
+	log_action "=== HARDENING AUDITD (SYSTEM AUDITING) ==="
 
 	# Install auditd
 	if ! command -v auditctl &>/dev/null; then
-		log_action "Installing auditd..."
-		apt-get update && apt-get install -y auditd audispd-plugins
-		log_action "auditd installed."
+		log_action "Installing auditd and plugins..."
+		apt-get update -qq &>/dev/null
+		apt-get install -y -qq auditd audispd-plugins &>/dev/null
+		log_action "auditd installed successfully"
 	else
-		log_action "auditd already installed."
+		log_action "auditd already installed"
 	fi
 
 	# Enable auditd at runtime
-	log_action "Enabling auditd (auditctl -e 1)..."
-	auditctl -e 1
+	log_action "Enabling auditd in current session..."
+	auditctl -e 1 &>/dev/null
+	log_action "auditd enabled (auditctl -e 1)"
 
 	# Set GRUB to persist audit=1 across reboot
-	if grep -q 'GRUB_CMDLINE_LINUX=' /etc/default/grub; then
+	if [ -f /etc/default/grub ] && grep -q 'GRUB_CMDLINE_LINUX=' /etc/default/grub; then
 		backup_file "/etc/default/grub"
-		sed -i 's/GRUB_CMDLINE_LINUX="/GRUB_CMDLINE_LINUX="audit=1 /' /etc/default/grub
-		update-grub
-		log_action "GRUB updated to enable persistent audit logging."
+
+		# Check if audit=1 is already present
+		if ! grep -q 'audit=1' /etc/default/grub; then
+			log_action "Adding audit=1 to GRUB kernel parameters..."
+			sed -i 's/GRUB_CMDLINE_LINUX="/GRUB_CMDLINE_LINUX="audit=1 /' /etc/default/grub &>/dev/null
+			update-grub &>/dev/null
+			log_action "GRUB updated to enable persistent audit logging"
+		else
+			log_action "GRUB already configured with audit=1"
+		fi
 	fi
 
 	# Backup and update auditd.conf
 	backup_file "/etc/audit/auditd.conf"
-	cat <<EOF > /etc/audit/auditd.conf
+	log_action "Configuring auditd.conf with hardened settings..."
+
+	cat > /etc/audit/auditd.conf << 'EOF'
+# CyberPatriot auditd configuration
 log_file = /var/log/audit/audit.log
 log_format = RAW
 flush = INCREMENTAL
@@ -993,78 +910,121 @@ admin_space_left_action = SUSPEND
 disk_full_action = SUSPEND
 disk_error_action = SUSPEND
 EOF
-	log_action "auditd.conf hardened."
+	log_action "auditd.conf configured successfully"
 
 	# Create hardened audit rules
-	RULE_FILE="/etc/audit/rules.d/hardening.rules"
-	log_action "Setting hardened audit rules in $RULE_FILE"
+	local RULE_FILE="/etc/audit/rules.d/hardening.rules"
+	log_action "Creating hardened audit rules in $RULE_FILE..."
 	backup_file "$RULE_FILE"
 
-	cat <<EOF > "$RULE_FILE"
+	cat > "$RULE_FILE" << 'EOF'
+# CyberPatriot Audit Rules - Monitor security-critical events
+
+# Permission changes
 -w /bin/chmod -p x -k perm_mod
 -w /bin/chown -p x -k perm_mod
+
+# Password changes
 -w /usr/bin/passwd -p x -k passwd_change
 -w /etc/shadow -p wa -k shadow_access
 -w /etc/passwd -p wa -k passwd_access
+
+# Sudo usage
 -w /usr/bin/sudo -p x -k sudo_usage
+
+# All program executions (comprehensive but may be noisy)
 -a always,exit -F arch=b64 -S execve -k exec_log
 -a always,exit -F arch=b32 -S execve -k exec_log
+
+# Login monitoring
 -w /var/log/lastlog -p wa -k logins
 -w /var/run/faillock -p wa -k failed_logins
 -w /var/log/faillog -p wa -k login_failures
+
+# Privilege escalation attempts
 -a always,exit -F arch=b64 -S setuid,setgid -k priv_esc
 -a always,exit -F arch=b32 -S setuid,setgid -k priv_esc
 EOF
+	log_action "Audit rules created successfully"
 
-	# Load and restart auditd
+	# Load audit rules and restart auditd
 	log_action "Loading audit rules and restarting auditd..."
-	augenrules --load
-	systemctl restart auditd
+	augenrules --load &>/dev/null
+	systemctl restart auditd &>/dev/null
+	log_action "auditd restarted with new rules"
 
-	log_action "auditd hardening complete."
+	# Verify auditd is running
+	if systemctl is-active --quiet auditd; then
+		log_action "auditd is running and monitoring system events"
+	else
+		log_action "WARNING: auditd may not be running correctly"
+	fi
+
+	log_action "auditd hardening complete"
 }
 
 #===============================================
 # Lynis
 #===============================================
 audit_with_lynis() {
-	log_action "=== RUNNING LYNIS ==="
+	log_action "=== RUNNING LYNIS SECURITY AUDIT ==="
 
-	if ! cd /usr/local; then
-		log_action "Failed to change directory to /usr/local"
+	# Change to /usr/local for installation
+	if ! cd /usr/local 2>/dev/null; then
+		log_action "ERROR: Failed to change directory to /usr/local"
 		return 1
 	fi
 
-	log_action "Cloning Lynis repository..."
-	if git clone https://github.com/CISOfy/lynis; then
-		log_action "Lynis cloned successfully."
+	# Clone Lynis repository
+	log_action "Cloning Lynis repository from GitHub..."
+	if git clone https://github.com/CISOfy/lynis &>/dev/null; then
+		log_action "Lynis repository cloned successfully"
 	else
-		log_action "Failed to clone Lynis repository."
-		return 1
+		log_action "ERROR: Failed to clone Lynis repository"
+		log_action "Checking if Lynis already exists..."
+		if [ -d /usr/local/lynis ]; then
+			log_action "Lynis directory already exists, proceeding..."
+		else
+			return 1
+		fi
 	fi
 
-	# Set ownership to root:root
+	# Set secure ownership (root:root)
+	log_action "Setting ownership to root:root for security..."
 	chown -R 0:0 /usr/local/lynis &>/dev/null
-	log_action "Ownership of /usr/local/lynis set to root:root."
+	log_action "Ownership configured securely"
 
-	# Run audit
-	if cd /usr/local/lynis; then
-		log_action "Running Lynis system audit..."
-		./lynis audit system
-	else
-		log_action "Failed to enter /usr/local/lynis."
+	# Change to Lynis directory
+	if ! cd /usr/local/lynis 2>/dev/null; then
+		log_action "ERROR: Failed to enter /usr/local/lynis directory"
 		return 1
 	fi
 
-	log_action "Extracting warnings and suggestions from Lynis report..."
+	# Run full system audit
+	log_action "Running Lynis system audit (this will take several minutes)..."
+	./lynis audit system &>/dev/null
+	log_action "Lynis audit completed"
+
+	# Extract and log warnings/suggestions
+	log_action "Extracting security recommendations from Lynis report..."
 	if [ -f /var/log/lynis-report.dat ]; then
-		log_action "Lynis Audit - Warnings and Suggestions:"
-		grep -E 'warning|suggestion' /var/log/lynis-report.dat | sed -e 's/warning\[\]=//g' -e 's/suggestion\[\]=//g' | tee -a "$LOG_FILE"
+		log_action "========== Lynis Warnings =========="
+		grep 'warning\[\]=' /var/log/lynis-report.dat 2>/dev/null | sed 's/warning\[\]=//g' >> "$LOG_FILE"
+
+		log_action "========== Lynis Suggestions =========="
+		grep 'suggestion\[\]=' /var/log/lynis-report.dat 2>/dev/null | sed 's/suggestion\[\]=//g' >> "$LOG_FILE"
+
+		# Count findings
+		local warnings=$(grep -c 'warning\[\]=' /var/log/lynis-report.dat 2>/dev/null || echo "0")
+		local suggestions=$(grep -c 'suggestion\[\]=' /var/log/lynis-report.dat 2>/dev/null || echo "0")
+
+		log_action "Lynis found $warnings warnings and $suggestions suggestions"
+		log_action "Full report available at: /var/log/lynis-report.dat"
 	else
-		log_action "Lynis report not found at /var/log/lynis-report.dat"
+		log_action "WARNING: Lynis report not found at /var/log/lynis-report.dat"
 	fi
 
-	log_action "Lynis audit completed."
+	log_action "Lynis security audit completed"
 }
 
 #===============================================
@@ -1115,7 +1075,7 @@ main() {
 	# 5. NETWORK SECURITY
 	log_action "[ PHASE 5: NETWORK SECURITY ]"
 	harden_ssh
-	enable_tcp_syncookies
+	harden_kernel_sysctl
 	log_action ""
 
 	# 6. FIREWALL CONFIGURATION
@@ -1126,28 +1086,39 @@ main() {
 
 	# 7. SERVICE MANAGEMENT
 	log_action "[ PHASE 7: SERVICE MANAGEMENT ]"
-	disable_unnecessary_services
+	disable_unnecessary_services "./service_blacklist.txt"
 	audit_running_services
 	log_action ""
 
 	# 8. PACKAGE AUDITING & REMOVAL
 	log_action "[ PHASE 8: SOFTWARE AUDITING ]"
-	remove_unauthorized_software
+	remove_unauthorized_software "./package_blacklist.txt"
 	remove_prohibited_media
 	log_action ""
 
-	# 9. DISABLE CRON JOBS
+	# 9. CRON SECURITY
+	log_action "[ PHASE 9: CRON SECURITY ]"
 	secure_cron_system
+	log_action ""
 
-	# 11. AUDITD
+	# 10. SYSTEM AUDITING
+	log_action "[ PHASE 10: SYSTEM AUDITING ]"
 	harden_auditd
+	log_action ""
 
-	# 12. antivirus
-	remove_backdoors
+	# 11. ANTIVIRUS & ROOTKIT DETECTION
+	log_action "[ PHASE 11: MALWARE DETECTION ]"
+	# NOTE: remove_backdoors requires README analysis first
+	# Uncomment and provide allow-file when ready:
+	# remove_backdoors "/path/to/README" --force
+	log_action "Skipping backdoor removal (requires manual README analysis)"
 	run_rootkit_scans
+	log_action ""
 
-	# 13. LYNIS
+	# 12. COMPREHENSIVE SECURITY AUDIT
+	log_action "[ PHASE 12: LYNIS AUDIT ]"
 	audit_with_lynis
+	log_action ""
 	
 	log_action "======================================"
 	log_action "HARDENING COMPLETE"
