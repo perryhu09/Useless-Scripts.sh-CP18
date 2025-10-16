@@ -374,6 +374,37 @@ secure_file_permissions() {
 	log_action "File perms hardening complete"
 }
 
+fix_sudoers_nopasswd() {
+	log_action "=== CHECKING SUDOERS FOR NOPASSWD ENTRIES ==="
+
+	local found_issues=0
+	local sudoers_files=()
+	[ -f /etc/sudoers ] && sudoers_files+=(/etc/sudoers)
+
+	if [ -d /etc/sudoers.d ]; then
+		for file in /etc/sudoers.d/*; do
+			[ -f "$file" ] && sudoers_files+=("$file")
+		done
+	fi
+
+	for sudoers_file in "${sudoers_files[@]}"; do
+		if grep -q "NOPASSWD" "$sudoers_file"; then
+			log_action "WARNING: Found NOPASSWD in $sudoers_file"
+			backup_file "$sudoers_file"
+
+			sed -i 's/^\(.*NOPASSWD.*\)$/# DISABLED BY HARDENING SCRIPT: \1/' "$sudoers_file"
+			log_action "Disabled NOPASSWD entries in $sudoers_file"
+			((found_issues++))
+		fi
+	done
+
+	if [ $found_issues -eq 0 ]; then
+		log_action "No NOPASSWD entries found in sudoers files"
+	else
+		log_action "Fixed $found_issues sudoers file(s) with NOPASSWD entries"
+	fi
+}
+
 find_world_writable_files() {
 	log_action "=== CHECKING FOR WORLD-WRITABLE FILES ==="
 	# meaning anyone can modify which is sec risk
@@ -429,6 +460,41 @@ find_orphaned_files() {
 #===============================================
 # Network Security
 #===============================================
+
+fix_hosts_file() {
+	log_action "=== SECURING /etc/hosts FILE ==="
+	
+	if [ ! -f /etc/hosts ]; then
+		log_action "WARNING: /etc/hosts not found"
+		return 1
+	fi
+
+	backup_file /etc/hosts
+
+	local suspicious_entries$(grep -vE '^(127\.0\.0\.1|127\.0\.1\.1|::1|fe00::|ff00::|ff02::)' /etc/hosts | grep -vE  '^\s*#' | grep -vE '^\s*$')
+	local suspicious_count=$(echo "$suspicious_entries" | grep -c "^" 2>/dev/null || echo "0")
+
+	if [ "$suspicious_count" -gt 0 ]; then
+		log_action "WARNING: Found $suspccious_count suspicious/non-standard entries in /etc/hosts"
+		log_action "Suspicious Entries:"
+		echo "$suspicious_entries" | while read line; do
+			log_action "	$line"
+		done
+	fi
+
+	cat > /etc/hosts << 'EOF'
+127.0.0.1 localhost
+127.0.1.1 ubuntu
+::1 ip6-localhost ip6-loopback
+fe00::0 ip6-localnet
+ff00::0 ip6-mcastprefix
+ff02::1 ip6-allnodes
+ff02::2 ip6-allrouters
+EOF
+
+	log_action "Reset /etc/hosts to secure default config"
+	log_action "Removed any malicious redirects or blocking entries"
+}
 
 # REQUIRES OpenSSH Sever Service to be installed (should be by default)
 harden_ssh() {
